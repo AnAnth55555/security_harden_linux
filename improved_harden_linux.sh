@@ -8,21 +8,23 @@ LOG_FILE="/var/log/security_hardening.log"
 SCRIPT_NAME=$(basename "$0")
 
 secure_sql() {
-	input "secure SQL" && apt-get -y install mysql-server && sed -i '/bind-address/ c\bind-address = 127.0.0.1' /etc/mysql/my.cnf && sudo service mysql restart
+	apt-get -y install mysql-server
+ 	sed -i '/bind-address/ c\bind-address = 127.0.0.1' /etc/mysql/my.cnf 
+	sudo service mysql restart
 }
 
 secure_vsftpd() {
-	input "secure VSFTP" && apt-get -y install vsftpd && sed -i '/^anon_upload_enable/ c\anon_upload_enable no' /etc/vsftpd.conf; sed -i '/^anonymous_enable/ c\anonymous_enable=NO' /etc/vsftpd.conf; sed -i '/^chroot_local_user/ c\chroot_local_user=YES' /etc/vsftpd.conf; service vsftpd restart
+	apt-get -y install vsftpd
+	sed -i '/^anon_upload_enable/ c\anon_upload_enable no' /etc/vsftpd.conf
+ 	sed -i '/^anonymous_enable/ c\anonymous_enable=NO' /etc/vsftpd.conf
+	sed -i '/^chroot_local_user/ c\chroot_local_user=YES' /etc/vsftpd.conf
+ 	service vsftpd restart
 }
 
 remove_files() {
 	for suffix in mp3 txt wav wma aac mp4 mov avi gif jpg bmp img exe msi bat; do find /home -name *.$suffix -type f -delete; done
-    print "Removed Media" "SUCCESS"
 }
 
-remove_packages() {
-    apt autoremove "$@" -y && print "Removed packages" "SUCCESS"
-}
 input() {
 	echo "Do you want to ""$1""[Y/n]"; read -r input; [[ $option =~ ^[Yy]$ ]] && return 0
 	return 1
@@ -31,6 +33,7 @@ input() {
 move() {
 	cd "$1" || { echo "Failure"; return 1; }
 }
+
 # Function for logging
 log() {
     local message="$(date '+%Y-%m-%d %H:%M:%S'): $1"
@@ -340,6 +343,14 @@ secure_boot() {
     log "Boot settings secured"
 }
 
+secure_ssh(){
+# Restrict SSH
+    sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config || handle_error "Failed to disable root login via SSH"
+    sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config || handle_error "Failed to disable password authentication for SSH"
+    sudo sed -i 's/^#Protocol.*/Protocol 2/' /etc/ssh/sshd_config || handle_error "Failed to set SSH protocol version"
+    sudo systemctl restart sshd || handle_error "Failed to restart SSH service"
+}
+
 # Function to configure IPv6
 configure_ipv6() {
     local disable_ipv6
@@ -357,6 +368,73 @@ configure_ipv6() {
             log "IPv6 will remain enabled"
             ;;
     esac
+}
+secure_squid(){
+	echo "Not avalible"
+}
+critical_services(){
+	clear
+	local input
+	cat << EOF
+0) OpenSSH
+1) Apache2 HTTP Service
+2) SQL
+3) vsftpd
+4) Squid Proxy Service
+5) Exit
+EOF
+	read input
+	case $input in
+		0) 
+			secure_ssh
+	 		critical_services
+			;;
+	 	1)
+	 		secure_apache
+			critical_services
+	 		;;
+		2)
+			secure_sql
+	 		critical_services
+			;;
+	 	3)
+			secure_vsftpd
+	 		critical_services
+			;;
+	 	4)
+			secure_squid
+	 		critical_services
+			;;
+	 	5)
+			sql
+	 		critical_services
+			;;
+	 	*)
+			echo "Error $1 incorrect input. Try again"
+	 		critical_services
+			;;
+	esac
+}
+
+fix_permissions() {
+    chmod -R 444 /var/log /etc/ssh 
+    chmod 440 /etc/passwd /etc/group 
+    chmod 640 /etc/shadow 
+    chown root:root /etc/passwd /etc/shadow /etc/group /etc/shadow- /etc/group- /etc/gshadow- /etc/passwd-
+    chmod o-rwx,g-wx /etc/shadow
+    chown root:shadow /etc/gshadow /etc/shadow-
+    chmod o-rwx,g-rw /etc/gshadow /etc/shadow-
+    chmod u-x,go-wx /etc/passwd- /etc/group-
+}
+
+user_management(){
+	clear
+	touch /home/passwords.txt
+	move /home; for u in $(ls); do echo "$u"":"$(LC_ALL=C tr -dc '[:graph:]' </dev/urandom | head -c 20; echo) >> /home/passwords.txt; input "remove ""$u" && userdel "$u" && rm -rf "$u"; done
+	chpasswd < /home/passwords.txt
+  clear
+  for s in $(getent group sudo | awk -F: '{print $4}'); do input "remove sudoer ""$s" && deluser "$s" sudo; done
+  clear
 }
 
 # Function to setup AppArmor
@@ -379,6 +457,21 @@ setup_apparmor() {
     log "Monitor /var/log/syslog and /var/log/auth.log for any AppArmor-related issues."
 }
 
+secure_apache() {
+	input "secure apache2" || { remove_service "apache2"; return 0 }
+    service apache2 start
+    service apache2 enable
+    ufw allow "Apache Full"
+    apt install libapache2-mod-security2
+    mv /etc/modsecurity/modsecurity.conf-recommended /etc/modsecurity/modsecurity.conf
+    useradd -r -s /bin/false apache
+    groupadd apache
+    useradd -G apache apache
+    chown -R apache:apache /opt/apache
+    chmod -R 750 /etc/apache2/* 
+    nano /etc/apache2/apache2conf
+    service apache2 restart
+}
 # Function to setup NTP
 setup_ntp() {
     log "Setting up NTP..."
@@ -472,13 +565,13 @@ additional_security() {
     # Enable process accounting
     install_package "acct"
     sudo /usr/sbin/accton on || handle_error "Failed to enable process accounting"
-    
-    # Restrict SSH
-    sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config || handle_error "Failed to disable root login via SSH"
-    sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config || handle_error "Failed to disable password authentication for SSH"
-    sudo sed -i 's/^#Protocol.*/Protocol 2/' /etc/ssh/sshd_config || handle_error "Failed to set SSH protocol version"
-    sudo systemctl restart sshd || handle_error "Failed to restart SSH service"
-    
+
+		log "Securing cron"
+		touch /etc/cron.allow /etc/at.allow
+    chmod og-rwx /etc/cron.allow /etc/at.allow /etc/crontab /etc/cron.hourly /etc/cron.daily /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.d
+    chown root:root /etc/cron.allow /etc/at.allow /etc/crontab /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.d
+		log "Finished securing cron"
+		
     # Configure strong password policy
     sudo sed -i 's/PASS_MAX_DAYS\t99999/PASS_MAX_DAYS\t90/' /etc/login.defs || handle_error "Failed to set password max days"
     sudo sed -i 's/PASS_MIN_DAYS\t0/PASS_MIN_DAYS\t7/' /etc/login.defs || handle_error "Failed to set password min days"
@@ -486,7 +579,21 @@ additional_security() {
     
     log "Additional security measures applied"
 }
-
+baselining() {
+    move /usr/local
+    git clone https://github.com/CISOfy/lynis
+    chown -R 0:0 /usr/local/lynis
+    move /usr/local/lynis
+    ./lynis update info
+    ./lynis audit system
+		move /
+	
+    rkhunter --update
+    rkhunter --propupd
+    rkhunter -c --enable all --disable none
+		
+		chkrootkit -l
+}
 # Function to setup automatic updates
 setup_automatic_updates() {
     log "Setting up automatic security updates..."
@@ -520,6 +627,10 @@ main() {
                 restore_backup
                 exit 0
                 ;;
+	    			-s|--services)
+     						critical_services
+					 			shift
+								;;
             *)
                 echo "Unknown option: $1"
                 display_help
