@@ -7,6 +7,14 @@ BACKUP_DIR="/root/security_backup_$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="/var/log/security_hardening.log"
 SCRIPT_NAME=$(basename "$0")
 
+input() {
+	echo "Do you want to ""$1""[Y/n]"; read -r input; [[ $option =~ ^[Yy]$ ]] && return 0
+	return 1
+}
+
+move() {
+	cd "$1" || { echo "Failure"; return 1; }
+}
 # Function for logging
 log() {
     local message="$(date '+%Y-%m-%d %H:%M:%S'): $1"
