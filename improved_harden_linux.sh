@@ -7,6 +7,22 @@ BACKUP_DIR="/root/security_backup_$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="/var/log/security_hardening.log"
 SCRIPT_NAME=$(basename "$0")
 
+secure_sql() {
+	input "secure SQL" && apt-get -y install mysql-server && sed -i '/bind-address/ c\bind-address = 127.0.0.1' /etc/mysql/my.cnf && sudo service mysql restart
+}
+
+secure_vsftpd() {
+	input "secure VSFTP" && apt-get -y install vsftpd && sed -i '/^anon_upload_enable/ c\anon_upload_enable no' /etc/vsftpd.conf; sed -i '/^anonymous_enable/ c\anonymous_enable=NO' /etc/vsftpd.conf; sed -i '/^chroot_local_user/ c\chroot_local_user=YES' /etc/vsftpd.conf; service vsftpd restart
+}
+
+remove_files() {
+	for suffix in mp3 txt wav wma aac mp4 mov avi gif jpg bmp img exe msi bat; do find /home -name *.$suffix -type f -delete; done
+    print "Removed Media" "SUCCESS"
+}
+
+remove_packages() {
+    apt autoremove "$@" -y && print "Removed packages" "SUCCESS"
+}
 input() {
 	echo "Do you want to ""$1""[Y/n]"; read -r input; [[ $option =~ ^[Yy]$ ]] && return 0
 	return 1
