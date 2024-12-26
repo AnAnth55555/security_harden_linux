@@ -661,6 +661,7 @@ main() {
         configure_sysctl
         additional_security
         setup_automatic_updates
+				user_management
     fi
     
 if [ -f "$GRUB_CONFIG" ]; then
